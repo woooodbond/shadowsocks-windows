@@ -89,9 +89,13 @@ namespace Shadowsocks.Controller
             StartTrafficStatistics(61);
         }
 
-        public void Start()
+        public void Start(bool regHotkeys = true)
         {
             Reload();
+            if (regHotkeys)
+            {
+                HotkeyReg.RegAllHotkeys();
+            }
         }
 
         protected void ReportError(Exception e)
@@ -175,10 +179,11 @@ namespace Shadowsocks.Controller
             return plugin.LocalEndPoint;
         }
 
-        public void SaveServers(List<Server> servers, int localPort)
+        public void SaveServers(List<Server> servers, int localPort, bool portableMode)
         {
             _config.configs = servers;
             _config.localPort = localPort;
+            _config.portableMode = portableMode;
             Configuration.Save(_config);
         }
 
@@ -250,7 +255,8 @@ namespace Shadowsocks.Controller
         {
             _config.isVerboseLogging = enabled;
             SaveConfig(_config);
-            if ( VerboseLoggingStatusChanged != null ) {
+            if (VerboseLoggingStatusChanged != null)
+            {
                 VerboseLoggingStatusChanged(this, new EventArgs());
             }
         }
@@ -545,9 +551,13 @@ namespace Shadowsocks.Controller
                 if (e is SocketException)
                 {
                     SocketException se = (SocketException)e;
-                    if (se.SocketErrorCode == SocketError.AccessDenied)
+                    if (se.SocketErrorCode == SocketError.AddressAlreadyInUse)
                     {
-                        e = new Exception(I18N.GetString("Port already in use"), e);
+                        e = new Exception(I18N.GetString("Port {0} already in use", _config.localPort), e);
+                    }
+                    else if (se.SocketErrorCode == SocketError.AccessDenied)
+                    {
+                        e = new Exception(I18N.GetString("Port {0} is reserved by system", _config.localPort), e);
                     }
                 }
                 Logging.LogUsefulException(e);
@@ -608,6 +618,7 @@ namespace Shadowsocks.Controller
             {
                 GFWListUpdater.MergeAndWritePACFile(FileManager.NonExclusiveReadAllText(Utils.GetTempPath("gfwlist.txt")));
             }
+            UpdateSystemProxy();
         }
 
         public void CopyPacUrl()
@@ -656,7 +667,7 @@ namespace Shadowsocks.Controller
             {
                 previous = trafficPerSecondQueue.Last();
                 current = new TrafficPerSecond();
-                
+
                 current.inboundCounter = InboundCounter;
                 current.outboundCounter = OutboundCounter;
                 current.inboundIncreasement = current.inboundCounter - previous.inboundCounter;

@@ -1,11 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Drawing;
-using System.Text;
 using System.Windows.Forms;
-using System.Diagnostics;
-using Microsoft.Win32;
 using Shadowsocks.Controller;
 using Shadowsocks.Model;
 using Shadowsocks.Properties;
@@ -22,14 +17,16 @@ namespace Shadowsocks.View
 
         public ConfigForm(ShadowsocksController controller)
         {
-            this.Font = System.Drawing.SystemFonts.MessageBoxFont;
+            this.Font = SystemFonts.MessageBoxFont;
             InitializeComponent();
 
             // a dirty hack
-            this.ServersListBox.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.ServersListBox.Dock = DockStyle.Fill;
+            this.tableLayoutPanel5.Dock = DockStyle.Fill;
             this.PerformLayout();
 
             UpdateTexts();
+            SetupValueChangedListeners();
             this.Icon = Icon.FromHandle(Resources.ssw128.GetHicon());
 
             this.controller = controller;
@@ -48,17 +45,37 @@ namespace Shadowsocks.View
             PasswordLabel.Text = I18N.GetString("Password");
             ShowPasswdCheckBox.Text = I18N.GetString("Show Password");
             EncryptionLabel.Text = I18N.GetString("Encryption");
-            PluginLabel.Text = I18N.GetString("Plugin");
+            PluginLabel.Text = I18N.GetString("Plugin Program");
             PluginOptionsLabel.Text = I18N.GetString("Plugin Options");
+            PluginArgumentsLabel.Text = I18N.GetString("Plugin Arguments");
+            NeedPluginArgCheckBox.Text = I18N.GetString("Need Plugin Argument");
             ProxyPortLabel.Text = I18N.GetString("Proxy Port");
+            PortableModeCheckBox.Text = I18N.GetString("Portable Mode");
+            toolTip1.SetToolTip(this.PortableModeCheckBox, I18N.GetString("Restart required"));
             RemarksLabel.Text = I18N.GetString("Remarks");
             TimeoutLabel.Text = I18N.GetString("Timeout(Sec)");
             ServerGroupBox.Text = I18N.GetString("Server");
             OKButton.Text = I18N.GetString("OK");
             MyCancelButton.Text = I18N.GetString("Cancel");
+            ApplyButton.Text = I18N.GetString("Apply");
             MoveUpButton.Text = I18N.GetString("Move &Up");
             MoveDownButton.Text = I18N.GetString("Move D&own");
             this.Text = I18N.GetString("Edit Servers");
+        }
+
+        private void SetupValueChangedListeners()
+        {
+            IPTextBox.TextChanged += ConfigValueChanged;
+            ProxyPortTextBox.TextChanged += ConfigValueChanged;
+            PasswordTextBox.TextChanged += ConfigValueChanged;
+            EncryptionSelect.SelectedIndexChanged += ConfigValueChanged;
+            PluginTextBox.TextChanged += ConfigValueChanged;
+            PluginArgumentsTextBox.TextChanged += ConfigValueChanged;
+            PluginOptionsTextBox.TextChanged += ConfigValueChanged;
+            RemarksTextBox.TextChanged += ConfigValueChanged;
+            TimeoutTextBox.TextChanged += ConfigValueChanged;
+            PortableModeCheckBox.CheckedChanged += ConfigValueChanged;
+            ServerPortTextBox.TextChanged += ConfigValueChanged;
         }
 
         private void controller_ConfigChanged(object sender, EventArgs e)
@@ -66,14 +83,12 @@ namespace Shadowsocks.View
             LoadCurrentConfiguration();
         }
 
-        private void ShowWindow()
+        private void ConfigValueChanged(object sender, EventArgs e)
         {
-            this.Opacity = 1;
-            this.Show();
-            IPTextBox.Focus();
+            ApplyButton.Enabled = true;
         }
 
-        private bool SaveOldSelectedServer()
+        private bool ValidateAndSaveSelectedServerDetails()
         {
             try
             {
@@ -81,36 +96,13 @@ namespace Shadowsocks.View
                 {
                     return true;
                 }
-                Server server = new Server();
-
-                if (Uri.CheckHostName(server.server = IPTextBox.Text.Trim()) == UriHostNameType.Unknown)
+                Server server = GetServerDetailsFromUI();
+                if (server == null)
                 {
-                    MessageBox.Show(I18N.GetString("Invalid server address"));
-                    IPTextBox.Focus();
                     return false;
                 }
-                if (!int.TryParse(ServerPortTextBox.Text, out server.server_port))
-                {
-                    MessageBox.Show(I18N.GetString("Illegal port number format"));
-                    ServerPortTextBox.Focus();
-                    return false;
-                }
-                server.password = PasswordTextBox.Text;
-                server.method = EncryptionSelect.Text;
-                server.plugin = PluginTextBox.Text;
-                server.plugin_opts = PluginOptionsTextBox.Text;
-                server.remarks = RemarksTextBox.Text;
-                if (!int.TryParse(TimeoutTextBox.Text, out server.timeout))
-                {
-                    MessageBox.Show(I18N.GetString("Illegal timeout format"));
-                    TimeoutTextBox.Focus();
-                    return false;
-                }
-                int localPort = int.Parse(ProxyPortTextBox.Text);
                 Configuration.CheckServer(server);
-                Configuration.CheckLocalPort(localPort);
                 _modifiedConfiguration.configs[_lastSelectedIndex] = server;
-                _modifiedConfiguration.localPort = localPort;
 
                 return true;
             }
@@ -121,28 +113,74 @@ namespace Shadowsocks.View
             return false;
         }
 
-        private void LoadSelectedServer()
+        private Server GetServerDetailsFromUI()
+        {
+            Server server = new Server();
+            if (Uri.CheckHostName(server.server = IPTextBox.Text.Trim()) == UriHostNameType.Unknown)
+            {
+                MessageBox.Show(I18N.GetString("Invalid server address"));
+                IPTextBox.Focus();
+                return null;
+            }
+            if (!int.TryParse(ServerPortTextBox.Text, out server.server_port))
+            {
+                MessageBox.Show(I18N.GetString("Illegal port number format"));
+                ServerPortTextBox.Focus();
+                return null;
+            }
+            server.password = PasswordTextBox.Text;
+            server.method = EncryptionSelect.Text;
+            server.plugin = PluginTextBox.Text;
+            server.plugin_opts = PluginOptionsTextBox.Text;
+            server.plugin_args = PluginArgumentsTextBox.Text;
+            server.remarks = RemarksTextBox.Text;
+            if (!int.TryParse(TimeoutTextBox.Text, out server.timeout))
+            {
+                MessageBox.Show(I18N.GetString("Illegal timeout format"));
+                TimeoutTextBox.Focus();
+                return null;
+            }
+            return server;
+        }
+
+        private void LoadSelectedServerDetails()
         {
             if (ServersListBox.SelectedIndex >= 0 && ServersListBox.SelectedIndex < _modifiedConfiguration.configs.Count)
             {
                 Server server = _modifiedConfiguration.configs[ServersListBox.SelectedIndex];
-
-                IPTextBox.Text = server.server;
-                ServerPortTextBox.Text = server.server_port.ToString();
-                PasswordTextBox.Text = server.password;
-                ProxyPortTextBox.Text = _modifiedConfiguration.localPort.ToString();
-                EncryptionSelect.Text = server.method ?? "aes-256-cfb";
-                PluginTextBox.Text = server.plugin;
-                PluginOptionsTextBox.Text = server.plugin_opts;
-                RemarksTextBox.Text = server.remarks;
-                TimeoutTextBox.Text = server.timeout.ToString();
+                SetServerDetailsToUI(server);
             }
         }
 
-        private void LoadConfiguration(Configuration configuration)
+        private void SetServerDetailsToUI(Server server)
+        {
+            IPTextBox.Text = server.server;
+            ServerPortTextBox.Text = server.server_port.ToString();
+            PasswordTextBox.Text = server.password;
+            EncryptionSelect.Text = server.method ?? "aes-256-cfb";
+            PluginTextBox.Text = server.plugin;
+            PluginOptionsTextBox.Text = server.plugin_opts;
+            PluginArgumentsTextBox.Text = server.plugin_args;
+
+            bool showPluginArgInput = !string.IsNullOrEmpty(server.plugin_args);
+            NeedPluginArgCheckBox.Checked = showPluginArgInput;
+            ShowHidePluginArgInput(showPluginArgInput);
+
+            RemarksTextBox.Text = server.remarks;
+            TimeoutTextBox.Text = server.timeout.ToString();
+        }
+
+        private void ShowHidePluginArgInput(bool show)
+        {
+            PluginArgumentsTextBox.Visible = show;
+            PluginArgumentsLabel.Visible = show;
+        }
+
+
+        private void LoadServerNameListToUI(Configuration configuration)
         {
             ServersListBox.Items.Clear();
-            foreach (Server server in _modifiedConfiguration.configs)
+            foreach (Server server in configuration.configs)
             {
                 ServersListBox.Items.Add(server.FriendlyName());
             }
@@ -151,20 +189,46 @@ namespace Shadowsocks.View
         private void LoadCurrentConfiguration()
         {
             _modifiedConfiguration = controller.GetConfigurationCopy();
-            LoadConfiguration(_modifiedConfiguration);
+            LoadServerNameListToUI(_modifiedConfiguration);
+
             _lastSelectedIndex = _modifiedConfiguration.index;
             if (_lastSelectedIndex < 0 || _lastSelectedIndex >= ServersListBox.Items.Count)
             {
                 _lastSelectedIndex = 0;
             }
+
             ServersListBox.SelectedIndex = _lastSelectedIndex;
-            UpdateMoveUpAndDownButton();
-            LoadSelectedServer();
+            UpdateButtons();
+            LoadSelectedServerDetails();
+            ProxyPortTextBox.Text = _modifiedConfiguration.localPort.ToString();
+            PortableModeCheckBox.Checked = _modifiedConfiguration.portableMode;
+            ApplyButton.Enabled = false;
         }
 
-        private void ConfigForm_Load(object sender, EventArgs e)
+        private bool SaveValidConfiguration()
         {
+            if (!ValidateAndSaveSelectedServerDetails())
+            {
+                return false;
+            }
+            if (_modifiedConfiguration.configs.Count == 0)
+            {
+                MessageBox.Show(I18N.GetString("Please add at least one server"));
+                return false;
+            }
 
+            int localPort = int.Parse(ProxyPortTextBox.Text);
+            Configuration.CheckLocalPort(localPort);
+            _modifiedConfiguration.localPort = localPort;
+
+            _modifiedConfiguration.portableMode = PortableModeCheckBox.Checked;
+
+            controller.SaveServers(_modifiedConfiguration.configs, _modifiedConfiguration.localPort, _modifiedConfiguration.portableMode);
+            // SelectedIndex remains valid
+            // We handled this in event handlers, e.g. Add/DeleteButton, SelectedIndexChanged
+            // and move operations
+            controller.SelectServerIndex(ServersListBox.SelectedIndex);
+            return true;
         }
 
         private void ConfigForm_KeyDown(object sender, KeyEventArgs e)
@@ -173,20 +237,8 @@ namespace Shadowsocks.View
 
             if (e.KeyCode == Keys.Enter)
             {
-                Server server = controller.GetCurrentServer();
-                if (!SaveOldSelectedServer())
-                {
-                    return;
-                }
-                if (_modifiedConfiguration.configs.Count == 0)
-                {
-                    MessageBox.Show(I18N.GetString("Please add at least one server"));
-                    return;
-                }
-                controller.SaveServers(_modifiedConfiguration.configs, _modifiedConfiguration.localPort);
-                controller.SelectServerIndex(_modifiedConfiguration.configs.IndexOf(server));
+                SaveValidConfiguration();
             }
-
         }
 
         private void ServersListBox_SelectedIndexChanged(object sender, EventArgs e)
@@ -200,44 +252,44 @@ namespace Shadowsocks.View
                 // we are moving back to oldSelectedIndex or doing a force move
                 return;
             }
-            if (!SaveOldSelectedServer())
+            if (!ValidateAndSaveSelectedServerDetails())
             {
                 // why this won't cause stack overflow?
                 ServersListBox.SelectedIndex = _lastSelectedIndex;
                 return;
             }
-            if (_lastSelectedIndex >= 0)
+            if (_lastSelectedIndex >= 0 && _lastSelectedIndex < _modifiedConfiguration.configs.Count)
             {
                 ServersListBox.Items[_lastSelectedIndex] = _modifiedConfiguration.configs[_lastSelectedIndex].FriendlyName();
             }
-            UpdateMoveUpAndDownButton();
-            LoadSelectedServer();
+            UpdateButtons();
+            LoadSelectedServerDetails();
             _lastSelectedIndex = ServersListBox.SelectedIndex;
         }
 
         private void AddButton_Click(object sender, EventArgs e)
         {
-            if (!SaveOldSelectedServer())
+            if (!ValidateAndSaveSelectedServerDetails())
             {
                 return;
             }
             Server server = Configuration.GetDefaultServer();
             _modifiedConfiguration.configs.Add(server);
-            LoadConfiguration(_modifiedConfiguration);
+            LoadServerNameListToUI(_modifiedConfiguration);
             ServersListBox.SelectedIndex = _modifiedConfiguration.configs.Count - 1;
             _lastSelectedIndex = ServersListBox.SelectedIndex;
         }
 
-        private void DuplicateButton_Click( object sender, EventArgs e )
+        private void DuplicateButton_Click(object sender, EventArgs e)
         {
-            if (!SaveOldSelectedServer())
+            if (!ValidateAndSaveSelectedServerDetails())
             {
                 return;
             }
             Server currServer = _modifiedConfiguration.configs[_lastSelectedIndex];
-            var currIndex = _modifiedConfiguration.configs.IndexOf( currServer );
+            var currIndex = _modifiedConfiguration.configs.IndexOf(currServer);
             _modifiedConfiguration.configs.Insert(currIndex + 1, currServer);
-            LoadConfiguration(_modifiedConfiguration);
+            LoadServerNameListToUI(_modifiedConfiguration);
             ServersListBox.SelectedIndex = currIndex + 1;
             _lastSelectedIndex = ServersListBox.SelectedIndex;
         }
@@ -255,33 +307,27 @@ namespace Shadowsocks.View
                 _lastSelectedIndex = _modifiedConfiguration.configs.Count - 1;
             }
             ServersListBox.SelectedIndex = _lastSelectedIndex;
-            LoadConfiguration(_modifiedConfiguration);
+            LoadServerNameListToUI(_modifiedConfiguration);
             ServersListBox.SelectedIndex = _lastSelectedIndex;
-            LoadSelectedServer();
+            LoadSelectedServerDetails();
         }
 
         private void OKButton_Click(object sender, EventArgs e)
         {
-            if (!SaveOldSelectedServer())
+            if (SaveValidConfiguration())
             {
-                return;
+                this.Close();
             }
-            if (_modifiedConfiguration.configs.Count == 0)
-            {
-                MessageBox.Show(I18N.GetString("Please add at least one server"));
-                return;
-            }
-            controller.SaveServers(_modifiedConfiguration.configs, _modifiedConfiguration.localPort);
-            // SelectedIndex remains valid
-            // We handled this in event handlers, e.g. Add/DeleteButton, SelectedIndexChanged
-            // and move operations
-            controller.SelectServerIndex(ServersListBox.SelectedIndex);
-            this.Close();
         }
 
         private void CancelButton_Click(object sender, EventArgs e)
         {
             this.Close();
+        }
+
+        private void ApplyButton_Click(object sender, EventArgs e)
+        {
+            SaveValidConfiguration();
         }
 
         private void ConfigForm_Shown(object sender, EventArgs e)
@@ -313,32 +359,19 @@ namespace Shadowsocks.View
             ServersListBox.SelectedIndex = index + step;
             ServersListBox.EndUpdate();
 
-            UpdateMoveUpAndDownButton();
+            UpdateButtons();
         }
 
-        private void UpdateMoveUpAndDownButton()
+        private void UpdateButtons()
         {
-            if (ServersListBox.SelectedIndex == 0)
-            {
-                MoveUpButton.Enabled = false;
-            }
-            else
-            {
-                MoveUpButton.Enabled = true;
-            }
-            if (ServersListBox.SelectedIndex == ServersListBox.Items.Count - 1)
-            {
-                MoveDownButton.Enabled = false;
-            }
-            else
-            {
-                MoveDownButton.Enabled = true;
-            }
+            DeleteButton.Enabled = (ServersListBox.Items.Count > 0);
+            MoveUpButton.Enabled = (ServersListBox.SelectedIndex > 0);
+            MoveDownButton.Enabled = (ServersListBox.SelectedIndex < ServersListBox.Items.Count - 1);
         }
 
         private void MoveUpButton_Click(object sender, EventArgs e)
         {
-            if (!SaveOldSelectedServer())
+            if (!ValidateAndSaveSelectedServerDetails())
             {
                 return;
             }
@@ -350,7 +383,7 @@ namespace Shadowsocks.View
 
         private void MoveDownButton_Click(object sender, EventArgs e)
         {
-            if (!SaveOldSelectedServer())
+            if (!ValidateAndSaveSelectedServerDetails())
             {
                 return;
             }
@@ -363,6 +396,11 @@ namespace Shadowsocks.View
         private void ShowPasswdCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             this.PasswordTextBox.UseSystemPasswordChar = !this.ShowPasswdCheckBox.Checked;
+        }
+
+        private void UsePluginArgCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            ShowHidePluginArgInput(this.NeedPluginArgCheckBox.Checked);
         }
     }
 }
