@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Windows.Forms;
+using NLog;
 using Shadowsocks.Model;
 using Shadowsocks.Properties;
 using Shadowsocks.Util;
@@ -15,6 +16,8 @@ namespace Shadowsocks.Controller
 {
     class PrivoxyRunner
     {
+        private static Logger logger = LogManager.GetCurrentClassLogger();
+
         private static int _uid;
         private static string _uniqueConfigFile;
         private static Job _privoxyJob;
@@ -33,7 +36,7 @@ namespace Shadowsocks.Controller
             }
             catch (IOException e)
             {
-                Logging.LogUsefulException(e);
+                logger.LogUsefulException(e);
             }
         }
 
@@ -49,10 +52,14 @@ namespace Shadowsocks.Controller
                     KillProcess(p);
                 }
                 string privoxyConfig = Resources.privoxy_conf;
-                _runningPort = GetFreePort();
+                _runningPort = GetFreePort(configuration.isIPv6Enabled);
                 privoxyConfig = privoxyConfig.Replace("__SOCKS_PORT__", configuration.localPort.ToString());
                 privoxyConfig = privoxyConfig.Replace("__PRIVOXY_BIND_PORT__", _runningPort.ToString());
-                privoxyConfig = privoxyConfig.Replace("__PRIVOXY_BIND_IP__", configuration.shareOverLan ? "0.0.0.0" : "127.0.0.1");
+                privoxyConfig = configuration.isIPv6Enabled
+                    ? privoxyConfig.Replace("__PRIVOXY_BIND_IP__", configuration.shareOverLan ? "[::]" : "[::1]")
+                    .Replace("__SOCKS_HOST__", "[::1]")
+                    : privoxyConfig.Replace("__PRIVOXY_BIND_IP__", configuration.shareOverLan ? "0.0.0.0" : "127.0.0.1")
+                    .Replace("__SOCKS_HOST__", "127.0.0.1");
                 FileManager.ByteArrayToFile(Utils.GetTempPath(_uniqueConfigFile), Encoding.UTF8.GetBytes(privoxyConfig));
 
                 _process = new Process
@@ -102,7 +109,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                logger.LogUsefulException(e);
             }
         }
 
@@ -135,18 +142,18 @@ namespace Shadowsocks.Controller
                  * are already dead, and that will cause exceptions here.
                  * We could simply ignore those exceptions.
                  */
-                Logging.LogUsefulException(ex);
+                logger.LogUsefulException(ex);
                 return false;
             }
         }
 
-        private int GetFreePort()
+        private int GetFreePort(bool isIPv6 = false)
         {
             int defaultPort = 8123;
             try
             {
                 // TCP stack please do me a favor
-                TcpListener l = new TcpListener(IPAddress.Loopback, 0);
+                TcpListener l = new TcpListener(isIPv6 ? IPAddress.IPv6Loopback : IPAddress.Loopback, 0);
                 l.Start();
                 var port = ((IPEndPoint)l.LocalEndpoint).Port;
                 l.Stop();
@@ -155,7 +162,7 @@ namespace Shadowsocks.Controller
             catch (Exception e)
             {
                 // in case access denied
-                Logging.LogUsefulException(e);
+                logger.LogUsefulException(e);
                 return defaultPort;
             }
         }

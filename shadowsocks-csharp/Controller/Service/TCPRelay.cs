@@ -1,4 +1,5 @@
-﻿using System;
+﻿using NLog;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -17,6 +18,7 @@ namespace Shadowsocks.Controller
 {
     class TCPRelay : Listener.Service
     {
+        private static Logger logger = LogManager.GetCurrentClassLogger();
         private ShadowsocksController _controller;
         private DateTime _lastSweepTime;
         private Configuration _config;
@@ -54,7 +56,7 @@ namespace Shadowsocks.Controller
             }
             foreach (TCPHandler handler1 in handlersToClose)
             {
-                Logging.Debug("Closing timed out TCP connection.");
+                logger.Debug("Closing timed out TCP connection.");
                 handler1.Close();
             }
 
@@ -122,6 +124,8 @@ namespace Shadowsocks.Controller
             }
         }
 
+        private static Logger Logger = LogManager.GetCurrentClassLogger();
+
         private readonly int _serverTimeout;
         private readonly int _proxyTimeout;
 
@@ -157,6 +161,7 @@ namespace Shadowsocks.Controller
         private int _firstPacketLength;
 
         private const int CMD_CONNECT = 0x01;
+        private const int CMD_BIND = 0x02;
         private const int CMD_UDP_ASSOC = 0x03;
 
         private int _addrBufLength = -1;
@@ -216,7 +221,7 @@ namespace Shadowsocks.Controller
             this._server = server;
 
             /* prepare address buffer length for AEAD */
-            Logging.Debug($"_addrBufLength={_addrBufLength}");
+            Logger.Debug($"_addrBufLength={_addrBufLength}");
             _encryptor.AddrBufLength = _addrBufLength;
         }
 
@@ -251,7 +256,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
             }
 
             if (_currentRemoteSession != null)
@@ -264,7 +269,7 @@ namespace Shadowsocks.Controller
                 }
                 catch (Exception e)
                 {
-                    Logging.LogUsefulException(e);
+                    Logger.LogUsefulException(e);
                 }
             }
 
@@ -290,7 +295,7 @@ namespace Shadowsocks.Controller
                     {
                         // reject socks 4
                         response = new byte[] { 0, 91 };
-                        Logging.Error("socks 5 protocol error");
+                        Logger.Error("socks 5 protocol error");
                     }
                     _connection.BeginSend(response, 0, response.Length, SocketFlags.None,
                         HandshakeSendCallback, null);
@@ -300,7 +305,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -325,7 +330,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -339,35 +344,39 @@ namespace Shadowsocks.Controller
                 if (bytesRead >= 5)
                 {
                     _command = _connetionRecvBuffer[1];
-                    if (_command != CMD_CONNECT && _command != CMD_UDP_ASSOC)
+                    switch(_command)
                     {
-                        Logging.Debug("Unsupported CMD=" + _command);
-                        Close();
-                    }
-                    else
-                    {
-                        if (_command == CMD_CONNECT)
-                        {
+                        case CMD_CONNECT:
+
+                            // +----+-----+-------+------+----------+----------+
+                            // |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+                            // +----+-----+-------+------+----------+----------+
+                            // | 1  |  1  | X'00' |  1   | Variable |    2     |
+                            // +----+-----+-------+------+----------+----------+
                             byte[] response = { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
                             _connection.BeginSend(response, 0, response.Length, SocketFlags.None,
                                 ResponseCallback, null);
-                        }
-                        else if (_command == CMD_UDP_ASSOC)
-                        {
+                            break;
+                        case CMD_UDP_ASSOC:
                             ReadAddress(HandleUDPAssociate);
-                        }
+                            break;
+                        case CMD_BIND:  // not implemented
+                        default:
+                            Logger.Debug("Unsupported CMD=" + _command);
+                            Close();
+                            break;
                     }
                 }
                 else
                 {
-                    Logging.Debug(
+                    Logger.Debug(
                         "failed to recv data in Shadowsocks.Controller.TCPHandler.handshakeReceive2Callback()");
                     Close();
                 }
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -382,7 +391,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -404,7 +413,7 @@ namespace Shadowsocks.Controller
                     ReadAddress(16 + ADDR_PORT_LEN - 1, onSuccess);
                     break;
                 default:
-                    Logging.Debug("Unsupported ATYP=" + atyp);
+                    Logger.Debug("Unsupported ATYP=" + atyp);
                     Close();
                     break;
             }
@@ -463,10 +472,7 @@ namespace Shadowsocks.Controller
                             break;
                     }
 
-                    if (_config.isVerboseLogging)
-                    {
-                        Logging.Info($"connect to {dstAddr}:{dstPort}");
-                    }
+                     Logger.Debug($"connect to {dstAddr}:{dstPort}");
 
                     _destEndPoint = SocketUtil.GetEndPoint(dstAddr, dstPort);
 
@@ -474,13 +480,13 @@ namespace Shadowsocks.Controller
                 }
                 else
                 {
-                    Logging.Debug("failed to recv data in Shadowsocks.Controller.TCPHandler.OnAddressFullyRead()");
+                    Logger.Debug("failed to recv data in Shadowsocks.Controller.TCPHandler.OnAddressFullyRead()");
                     Close();
                 }
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -532,7 +538,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -626,7 +632,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -645,7 +651,7 @@ namespace Shadowsocks.Controller
             }
             var proxy = timer.Session.Remote;
 
-            Logging.Info($"Proxy {proxy.ProxyEndPoint} timed out");
+            Logger.Info($"Proxy {proxy.ProxyEndPoint} timed out");
             proxy.Close();
             Close();
         }
@@ -673,12 +679,9 @@ namespace Shadowsocks.Controller
 
                 _proxyConnected = true;
 
-                if (_config.isVerboseLogging)
+                if (!(remote is DirectConnect))
                 {
-                    if (!(remote is DirectConnect))
-                    {
-                        Logging.Info($"Socket connected to proxy {remote.ProxyEndPoint}");
-                    }
+                    Logger.Debug($"Socket connected to proxy {remote.ProxyEndPoint}");
                 }
 
                 _startConnectTime = DateTime.Now;
@@ -705,7 +708,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -726,7 +729,7 @@ namespace Shadowsocks.Controller
             Server server = timer.Server;
             IStrategy strategy = _controller.GetCurrentStrategy();
             strategy?.SetFailure(server);
-            Logging.Info($"{server.FriendlyName()} timed out");
+            Logger.Info($"{server.FriendlyName()} timed out");
             session.Remote.Close();
             Close();
         }
@@ -749,10 +752,7 @@ namespace Shadowsocks.Controller
 
                 _destConnected = true;
 
-                if (_config.isVerboseLogging)
-                {
-                    Logging.Info($"Socket connected to ss server: {_server.FriendlyName()}");
-                }
+                Logger.Debug($"Socket connected to ss server: {_server.FriendlyName()}");
 
                 var latency = DateTime.Now - _startConnectTime;
                 IStrategy strategy = _controller.GetCurrentStrategy();
@@ -771,7 +771,7 @@ namespace Shadowsocks.Controller
                     IStrategy strategy = _controller.GetCurrentStrategy();
                     strategy?.SetFailure(_server);
                 }
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -798,12 +798,12 @@ namespace Shadowsocks.Controller
                     PipeRemoteReceiveCallback, session);
 
                 TryReadAvailableData();
-                Logging.Debug($"_firstPacketLength = {_firstPacketLength}");
+                Logger.Debug($"_firstPacketLength = {_firstPacketLength}");
                 SendToServer(_firstPacketLength, session);
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -829,7 +829,7 @@ namespace Shadowsocks.Controller
                         }
                         catch (CryptoErrorException)
                         {
-                            Logging.Error("decryption error");
+                            Logger.Error("decryption error");
                             Close();
                             return;
                         }
@@ -837,12 +837,12 @@ namespace Shadowsocks.Controller
                     if (bytesToSend == 0)
                     {
                         // need more to decrypt
-                        Logging.Debug("Need more to decrypt");
+                        Logger.Debug("Need more to decrypt");
                         session.Remote.BeginReceive(_remoteRecvBuffer, 0, RecvSize, SocketFlags.None,
                             PipeRemoteReceiveCallback, session);
                         return;
                     }
-                    Logging.Debug($"start sending {bytesToSend}");
+                    Logger.Debug($"start sending {bytesToSend}");
                     _connection.BeginSend(_remoteSendBuffer, 0, bytesToSend, SocketFlags.None,
                         PipeConnectionSendCallback, new object[] { session, bytesToSend });
                     IStrategy strategy = _controller.GetCurrentStrategy();
@@ -857,7 +857,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -885,7 +885,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -902,7 +902,7 @@ namespace Shadowsocks.Controller
                 }
                 catch (CryptoErrorException)
                 {
-                    Logging.Debug("encryption error");
+                    Logger.Debug("encryption error");
                     Close();
                     return;
                 }
@@ -927,7 +927,7 @@ namespace Shadowsocks.Controller
                 int bytesRemaining = bytesShouldSend - bytesSent;
                 if (bytesRemaining > 0)
                 {
-                    Logging.Info("reconstruct _connetionSendBuffer to re-send");
+                    Logger.Info("reconstruct _connetionSendBuffer to re-send");
                     Buffer.BlockCopy(_connetionSendBuffer, bytesSent, _connetionSendBuffer, 0, bytesRemaining);
                     session.Remote.BeginSend(_connetionSendBuffer, 0, bytesRemaining, SocketFlags.None,
                         PipeRemoteSendCallback, new object[] { session, bytesRemaining });
@@ -938,7 +938,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
@@ -955,7 +955,7 @@ namespace Shadowsocks.Controller
                 var bytesRemaining = bytesShouldSend - bytesSent;
                 if (bytesRemaining > 0)
                 {
-                    Logging.Info("reconstruct _remoteSendBuffer to re-send");
+                    Logger.Info("reconstruct _remoteSendBuffer to re-send");
                     Buffer.BlockCopy(_remoteSendBuffer, bytesSent, _remoteSendBuffer, 0, bytesRemaining);
                     _connection.BeginSend(_remoteSendBuffer, 0, bytesRemaining, SocketFlags.None,
                         PipeConnectionSendCallback, new object[] { session, bytesRemaining });
@@ -966,7 +966,7 @@ namespace Shadowsocks.Controller
             }
             catch (Exception e)
             {
-                Logging.LogUsefulException(e);
+                Logger.LogUsefulException(e);
                 Close();
             }
         }
